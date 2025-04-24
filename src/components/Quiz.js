@@ -7,6 +7,7 @@ import Fact from "./Fact";
 import ScoreCard from "./ScoreCard";
 import Hero from '@/components/Hero';
 import domtoimage from "dom-to-image";
+import { useSession } from "next-auth/react";
 import {
     Dialog,
     DialogContent,
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/dialog"
 
 const Quiz = () => {
+    const { data: session, status } = useSession();
     const [randomDestination, setRandomDestination] = useState({});
     const [loading, setLoading] = useState(true);
     const [score, setScore] = useState(0);
@@ -30,7 +32,7 @@ const Quiz = () => {
     const [totalAnswers, setTotalAnswers] = useState(0);
     const [accuracy, setAccuracy] = useState(0);
     const [imageUrl, setImageUrl] = useState(null);
-    const captureRef = useRef(null);
+    const [highScore, setHighScore] = useState(0);
 
     useEffect(() => {
         getRandomDestination();
@@ -38,10 +40,10 @@ const Quiz = () => {
 
     const getRandomDestination = async () => {
         try {
-            const response = await axios.get("/api/random-dest");
+            const response = await axios.get('/api/random-dest');
             setRandomDestination(response.data);
-            setShowNextClue(false);
-            setOptions([...response.data.options].sort(() => Math.random() - 0.5));
+            console.log(response.data.options);
+            setOptions([response.data.options].sort(() => Math.random() - 0.5));
             setLoading(false);
         } catch (error) {
             console.error(error);
@@ -49,39 +51,72 @@ const Quiz = () => {
     };
 
     const checkAnswer = (option) => {
-        if (selected) return; // Prevent multiple clicks
-
         setSelected(option);
-        setTotalAnswers(totalAnswers + 1);
 
         if (option === randomDestination.correctDestination.city) {
             setCorrect(true);
             setScore(score + 10);
             setCorrectAnswers(correctAnswers + 1);
+            setTotalAnswers(totalAnswers + 1);
+            const end = Date.now() + 1 * 1000; // 1 second
+            const colors = ["#a786ff", "#fd8bbc", "#eca184", "#f8deb1"];
 
-            // Confetti effect only for correct answers
-            confetti({
-                particleCount: 100,
-                spread: 70,
-                origin: { y: 0.6 },
-                colors: ["#a786ff", "#fd8bbc", "#eca184", "#f8deb1"],
-            });
+            const frame = () => {
+                if (Date.now() > end) return;
+
+                confetti({
+                    particleCount: 2,
+                    angle: 60,
+                    spread: 55,
+                    startVelocity: 60,
+                    origin: { x: 0, y: 0.5 },
+                    colors: colors,
+                });
+                confetti({
+                    particleCount: 2,
+                    angle: 120,
+                    spread: 55,
+                    startVelocity: 60,
+                    origin: { x: 1, y: 0.5 },
+                    colors: colors,
+                });
+
+                requestAnimationFrame(frame);
+            };
+
+            frame();
+
+            if (session && session.user) {
+                updateHighScore();
+            }
+
         } else {
             setCorrect(false);
             setWrongAnswers(wrongAnswers + 1);
+            setTotalAnswers(totalAnswers + 1);
         }
-
-        setAccuracy(((correctAnswers / (totalAnswers + 1)) * 100).toFixed(2));
-    };
+        const newCorrect = option === randomDestination.correctDestination.city ? correctAnswers + 1 : correctAnswers;
+        const newTotal = totalAnswers + 1;
+        setAccuracy(((newCorrect / newTotal) * 100).toFixed(2));
+    }
 
     const updateHighScore = async () => {
+        if (!session || !session.user || !session.user.email) {
+            console.log('User not logged in, skipping high score update');
+            return;
+        }
+
         try {
             const response = await axios.get(`/api/highscore?email=${session.user.email}`);
             const highScore = response.data.highscore;
-            console.log(score, highScore);
+            setHighScore(highScore);
+
             if (score > highScore) {
-                console.log(score, highScore);
-                await axios.post('/api/highscore', { email: session.user.email, highscore: score });
+                await axios.post('/api/highscore', {
+                    email: session.user.email,
+                    highscore: score
+                });
+                setHighScore(score);
                 console.log('New high score updated!');
             } else {
                 console.log('Score did not beat the high score.');
@@ -95,62 +130,33 @@ const Quiz = () => {
         setCorrect(false);
         setSelected("");
         getRandomDestination();
+
+        // Only update high score if user is logged in
+        if (session && session.user) {
+            updateHighScore();
+        }
+
+        setShowNextClue(false);
     };
 
-    const generateImageAndShare = async (cardRef) => {
-        if (!cardRef.current) return;
-    
-        try {
-            // Convert the div to an image
-            const dataUrl = await domtoimage.toPng(cardRef.current);
-            setImageUrl(dataUrl);
-    
-            // Convert dataURL to Blob
-            const blob = await fetch(dataUrl).then((res) => res.blob());
-    
-            // Create FormData to send to Cloudinary
-            const formData = new FormData();
-            formData.append("file", blob);
-            formData.append("upload_preset", process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET);
-    
-            // Upload to Cloudinary
-            const response = await axios.post(
-                `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
-                formData,
-                {
-                    headers: {
-                        "Content-Type": "multipart/form-data",
-                        "Access-Control-Allow-Origin": "*",  // Allow all origins (for testing)
-                    },
-                }
-            );
-    
-            console.log("Image uploaded successfully:", response.data.secure_url);
-            setImageUrl(response.data.secure_url); // Ensure it's updated for WhatsApp sharing
-            return response.data.secure_url;
-    
-        } catch (error) {
-            console.error("Image generation or upload failed:", error);
-        }
-    };    
-    
-    const shareImage = () => {
-        const customLink = `https://maparena.com/challenge?score=${score}`;
-        const message = `🌍 I just played Maparena!\n💯 Score: ${score}\n \nCan you beat my score? Check it out here: ${customLink}`;
-    
-        if (navigator.share) {
-            navigator.share({
-                title: "Maparena Challenge",
-                text: message,
-                url: imageUrl, // Some devices support images
-            }).catch(error => console.error("Sharing failed:", error));
-        } else {
-            // Fallback to WhatsApp text sharing
-            const whatsappURL = `https://wa.me/?text=${encodeURIComponent(message)}`;
-            window.open(whatsappURL, "_blank");
+    const generateImageAndShare = async () => {
+        if (cardRef.current) {
+            try {
+                const dataUrl = await domtoimage.toPng(cardRef.current);
+                setImageUrl(dataUrl); // Store the generated image URL
+            } catch (error) {
+                console.error("Image generation failed:", error);
+            }
         }
     };
-    
+
+    const shareImage = () => {
+        const customLink = `https://globetrotter-plum.vercel.app/?score=${score}`;
+        const message = `🌍 I just played Globetrotter!\n💯 Score: ${score}\n \nCan you beat my score? Check it out here: ${customLink}`;
+        const whatsappURL = `https://wa.me/?text=${encodeURIComponent(message)}&url=${encodeURIComponent(imageUrl)}`;
+
+        window.open(whatsappURL, "_blank");
+    }
 
     if (loading) {
         return <div>Loading...</div>;
@@ -197,17 +203,17 @@ const Quiz = () => {
 
             {/* Options Section */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8 w-full justify-center pt-3 items-center">
-                {options.map((option, index) => (
+                {options[0].map((option, index) => (
                     <div key={index}>
                         <a href="/#fact-card" className="group flex justify-center">
-                        <OptionCard
-                            option="Play"
-                            disabled={!!selected} // Disable after selection
-                            className={`py-5 px-8 w-full max-w-md h-20 rounded-2xl text-center font-bold text-lg transition-all`}
-                            onClick={() => checkAnswer(option)}
-                        >
-                            {option}
-                        </OptionCard>
+                            <OptionCard
+                                option="option"
+                                disabled={!!selected} // Disable after selection
+                                className={`py-5 px-8 w-full max-w-md h-20 rounded-2xl text-center font-bold text-lg transition-all`}
+                                onClick={() => checkAnswer(option)}
+                            >
+                                {option}
+                            </OptionCard>
                         </a>
                     </div>
                 ))}

@@ -4,7 +4,7 @@ import { Trophy, Check, X } from 'lucide-react'
 const ScoreCard = ({ score, correctAnswers, totalAnswers, accuracy }) => {
   return (
     <div className="p-8 w-full max-w-5xl mx-auto">
-      <h3 className="text-3xl font-bold mb-6 flex items-center text-white justify-center">
+      <h3 className="text-3xl font-bold mb-6 flex items-center text-gray-700 justify-center">
         <Trophy className="h-6 w-6 text-yellow-500 mr-3" />
         Your Stats
       </h3>
